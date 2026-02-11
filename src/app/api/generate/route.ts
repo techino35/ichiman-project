@@ -32,16 +32,71 @@ const SYSTEM_PROMPT = `あなたは異世界転生の神です。現世の人間
 - 全て日本語で出力
 - JSONのみ出力。説明文やマークダウンは一切不要`;
 
-export async function POST(request: NextRequest) {
-  const apiKey = process.env.GEMINI_API_KEY;
+async function generateWithGroq(userPrompt: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("GROQ_API_KEY not set");
 
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: "API key not configured" },
-      { status: 500 }
-    );
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 1.0,
+      max_tokens: 1024,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Groq API error:", errText);
+    throw new Error("Groq API failed");
   }
 
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || "";
+}
+
+async function generateWithGemini(userPrompt: string): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY not set");
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          { role: "user", parts: [{ text: SYSTEM_PROMPT + "\n\n" + userPrompt }] },
+        ],
+        generationConfig: {
+          temperature: 1.0,
+          maxOutputTokens: 1024,
+          responseMimeType: "application/json",
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error("Gemini API error:", errText);
+    throw new Error("Gemini API failed");
+  }
+
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+export async function POST(request: NextRequest) {
   const { name, job, hobbies, personality, desire } = await request.json();
 
   if (!name || !job) {
@@ -59,45 +114,17 @@ export async function POST(request: NextRequest) {
 異世界でやりたいこと: ${desire || "冒険"}`;
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: SYSTEM_PROMPT + "\n\n" + userPrompt }],
-            },
-          ],
-          generationConfig: {
-            temperature: 1.0,
-            maxOutputTokens: 1024,
-            responseMimeType: "application/json",
-          },
-        }),
-      }
-    );
-
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Gemini API error:", errorText);
-      return NextResponse.json(
-        { error: "AI generation failed" },
-        { status: 500 }
-      );
+    // Groqを優先、失敗したらGeminiにフォールバック
+    let text: string;
+    try {
+      text = await generateWithGroq(userPrompt);
+    } catch {
+      console.log("Groq failed, falling back to Gemini");
+      text = await generateWithGemini(userPrompt);
     }
 
-    const data = await res.json();
-    const text =
-      data.candidates?.[0]?.content?.parts?.[0]?.text;
-
     if (!text) {
-      return NextResponse.json(
-        { error: "Empty response from AI" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Empty response" }, { status: 500 });
     }
 
     const profile = JSON.parse(text);
