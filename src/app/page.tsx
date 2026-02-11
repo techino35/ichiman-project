@@ -307,12 +307,23 @@ ${name}の転生結果:
         </div>
 
         {/* Share */}
-        <button
-          onClick={handleShare}
-          className="w-full rounded-xl bg-[#1DA1F2] py-3 text-center font-bold text-white transition hover:bg-[#1a91da]"
-        >
-          Xで結果をシェアする
-        </button>
+        <div className="space-y-2">
+          <button
+            onClick={handleShare}
+            className="w-full rounded-xl bg-[#1DA1F2] py-3 text-center font-bold text-white transition hover:bg-[#1a91da]"
+          >
+            Xで結果をシェアする
+          </button>
+          <button
+            onClick={() => {
+              const lineUrl = `https://social-plugins.line.me/lineit/share?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`;
+              window.open(lineUrl, "_blank");
+            }}
+            className="w-full rounded-xl bg-[#06C755] py-3 text-center font-bold text-white transition hover:bg-[#05b34c]"
+          >
+            LINEで送る
+          </button>
+        </div>
       </div>
 
       {/* Retry */}
@@ -358,8 +369,18 @@ function PremiumModal({ onClose }: { onClose: () => void }) {
           style={{
             background: "linear-gradient(135deg, #d4a847, #f0d78c)",
           }}
-          onClick={() => {
-            alert("Proプランは近日公開予定です！お楽しみに。");
+          onClick={async () => {
+            try {
+              const res = await fetch("/api/checkout", { method: "POST" });
+              const data = await res.json();
+              if (data.url) {
+                window.location.href = data.url;
+              } else {
+                alert("Proプランは準備中です。もうしばらくお待ちください！");
+              }
+            } catch {
+              alert("Proプランは準備中です。もうしばらくお待ちください！");
+            }
           }}
         >
           Proプランを始める
